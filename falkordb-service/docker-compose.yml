@@ -1,0 +1,56 @@
+version: '3.8'
+
+services:
+  falkordb:
+    image: falkordb/falkordb:latest
+    container_name: falkordb
+    ports:
+      - "6379:6379"
+      - "3000:3000"
+    volumes:
+      - falkordb_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - grynya-net
+
+  bridge:
+    build:
+      context: .
+      dockerfile: bridge.Dockerfile
+    container_name: grynya-bridge
+    depends_on:
+      falkordb:
+        condition: service_healthy
+    volumes:
+      - ./scripts:/app/scripts
+    restart: unless-stopped
+    stdin_open: true
+    networks:
+      - grynya-net
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: unless-stopped
+    networks:
+      - grynya-net
+
+volumes:
+  falkordb_data:
+    driver: local
+  ollama_data:
+    driver: local
+
+networks:
+  grynya-net:
+    driver: bridge
