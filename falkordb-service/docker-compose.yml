@@ -11,7 +11,7 @@ services:
       - falkordb_data:/data
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: [ "CMD", "redis-cli", "ping" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -41,6 +41,25 @@ services:
       - "11434:11434"
     volumes:
       - ollama_data:/root/.ollama
+    restart: unless-stopped
+    networks:
+      - grynya-net
+
+  mcp_server:
+    build:
+      context: ./mcp
+      dockerfile: Dockerfile
+    container_name: grynya-mcp-server
+    depends_on:
+      falkordb:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./mcp:/app
+    environment:
+      - FALKORDB_HOST=falkordb
+      - FALKORDB_PORT=6379
     restart: unless-stopped
     networks:
       - grynya-net
