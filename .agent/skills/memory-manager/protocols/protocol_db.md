@@ -11,13 +11,9 @@
 
 1.  **Створи вузол `:Session`** (блок `session` в JSON) з атрибутами `id`, `name`, `topic` (коротко), `status: 'active'`, `trigger: '/db'`.
 2.  **Створи вузол `:Request`** з текстом запиту від користувача.
-3.  **Створи вузол `:Response`** з ПОВНИМ текстом твоєї поточної відповіді (`full_text`).
-4.  **Витягни сутності (`:Entity`):** Уважно проаналізуй запит користувача та власну відповідь. Витягни **УСІ** значущі концепції, технології чи правила.
+3.  **Витягни сутності (`:Entity`):** Уважно проаналізуй запит користувача. Витягни **УСІ** значущі концепції, технології чи правила.
 5.  **Налаштуй Зв'язки (`relations`):**
     *   Request `PART_OF` Session.
-    *   Response `PART_OF` Session.
-    *   Response `RESPONDS_TO` Request.
-    *   Request та Response `MENTIONS` Entity (з атрибутом `relevance`).
     *   Session `INVOLVES` Entity.
 6.  **Налаштуй Хронологію (`chronology`):**
     *   Вкажи поточний рік (`year`), дату (`date`), час (`time`).
@@ -25,7 +21,6 @@
     *   Створи `next_links`:
         *   Від попередньої сесії (`session_X`) до нової (`session_Y`).
         *   Від нової сесії до Request.
-        *   Від Request до Response.
     *   Онови `last_event_id` на ID твого Response.
 
 **Виконання:** Передай JSON скрипту `memory_bridge.py` через `run_command`. 
