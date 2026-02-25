@@ -1,0 +1,8 @@
+{
+    "mcpServers": {
+        "falkordb": {
+            "type": "sse",
+            "url": "http://grynya-mcp-server:8000/sse"
+        }
+    }
+}
