@@ -51,7 +51,9 @@ async def startup_event():
 from mcp.server.fastmcp import FastMCP
 
 # Ініціалізація MCP Сервера
-mcp = FastMCP("grynya-falkordb-mcp")
+# Передаємо host="0.0.0.0", щоб вимкнути захист DNS Rebinding у FastMCP 
+# і дозволити підключення з інших Docker контейнерів
+mcp = FastMCP("grynya-falkordb-mcp", host="0.0.0.0")
 
 @app.get("/health")
 async def health():
