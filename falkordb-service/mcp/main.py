@@ -320,3 +320,27 @@ async def batch_link_nodes(links: list) -> str:
             results.append({"query": q, "status": "error", "message": str(e)})
 
     return json.dumps({"status": "success", "results": results})
+
+
+@mcp.tool()
+async def delete_node(node_id: str) -> str:
+    """Видаляє вузол з графа (включаючи всі його зв'язки)."""
+    try:
+        r = await get_db()
+        query = f"MATCH (n {{id: '{node_id}'}}) DETACH DELETE n"
+        await r.execute_command("GRAPH.QUERY", GRAPH_NAME, query)
+        return json.dumps({"status": "success", "query": query})
+    except Exception as e:
+        return json.dumps({"status": "error", "message": str(e)})
+
+
+@mcp.tool()
+async def delete_link(source_id: str, target_id: str, rel_type: str) -> str:
+    """Видаляє конкретний зв'язок між вузлами."""
+    try:
+        r = await get_db()
+        query = f"MATCH (s {{id: '{source_id}'}})-[r:{rel_type}]->(t {{id: '{target_id}'}}) DELETE r"
+        await r.execute_command("GRAPH.QUERY", GRAPH_NAME, query)
+        return json.dumps({"status": "success", "query": query})
+    except Exception as e:
+        return json.dumps({"status": "error", "message": str(e)})
