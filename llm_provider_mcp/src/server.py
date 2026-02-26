@@ -64,23 +64,48 @@ def call_gemini(prompt: str, system_prompt: str, model: str) -> str:
         return f"Error: Token file not found at {token_path}. Please generate it via OAuth and place it in the credentials folder."
         
     try:
+        from google.auth.transport.requests import Request
+        import requests
+        
         creds = Credentials.from_authorized_user_file(token_path)
-        client = genai.Client(credentials=creds)
+        if not creds.valid:
+            if creds.expired and creds.refresh_token:
+                creds.refresh(Request())
+            
+        print(f"[call_gemini] Using direct REST API request with Bearer token.")
         
-        config = None
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+        headers = {
+            "Authorization": f"Bearer {creds.token}",
+            "Content-Type": "application/json"
+        }
+        
+        payload = {
+            "contents": [{
+                "parts": [{"text": prompt}]
+            }]
+        }
+        
         if system_prompt:
-            config = types.GenerateContentConfig(
-                system_instruction=system_prompt,
-            )
-        
+            payload["systemInstruction"] = {
+                "parts": [{"text": system_prompt}]
+            }
+            
         print(f"[call_gemini] Sending request to Gemini {model}... This might take a while.")
-        response = client.models.generate_content(
-            model=model,
-            contents=prompt,
-            config=config,
-        )
+        response = requests.post(url, headers=headers, json=payload)
+        
+        if response.status_code != 200:
+            return f"Error: Gemini API returned status {response.status_code}: {response.text}"
+            
+        data = response.json()
         print("[call_gemini] Received response from Gemini API.")
-        return response.text
+        
+        if "candidates" in data and len(data["candidates"]) > 0:
+            parts = data["candidates"][0].get("content", {}).get("parts", [])
+            text = "".join([p.get("text", "") for p in parts])
+            return text
+        else:
+            return f"Returned unexpected format: {data}"
     except Exception as e:
         print(f"[call_gemini] Encountered an error: {str(e)}")
         import traceback
@@ -117,10 +142,27 @@ def call_openai(prompt: str, system_prompt: str, model: str) -> str:
 
 async def agent_task_wrapper(task_id: str, prompt: str, system_prompt: str, model: str):
     """Background wrapper that executes the LLM task via a thread and manages state."""
+    from mcp.client.sse import sse_client
+    from mcp.client.session import ClientSession
+    
     current_task_id.set(task_id)
     state = TaskManager[task_id]
     try:
         print(f"--- [Task {task_id}] Execution Started ---")
+        
+        server_url = "http://grynya-mcp-server:8000/sse"
+        print(f"[{task_id}] Connecting to MCP server at {server_url}...")
+        
+        async with sse_client(server_url, headers={"Host": "localhost"}) as streams:
+            print(f"[{task_id}] SSE connection established.")
+            async with ClientSession(streams[0], streams[1]) as session:
+                await session.initialize()
+                print(f"[{task_id}] MCP Session initialized.")
+                
+                tools_response = await session.list_tools()
+                tool_names = [t.name for t in tools_response.tools]
+                print(f"[{task_id}] Discovered tools: {tool_names}")
+                print(f"[{task_id}] Бачу базу та інструменти, полет нормальний.")
         
         # Execute blocking calls off the main event loop
         model_lower = model.lower()
@@ -131,7 +173,7 @@ async def agent_task_wrapper(task_id: str, prompt: str, system_prompt: str, mode
         else:
             result = f"Error: Unsupported model identifier '{model}'. Must contain 'gemini', 'gpt', 'o1' or 'o3'."
             
-        state.result = result
+        state.result = f"{result}\n\n[Автономний агент рапортує: Бачу базу та інструменти, полет нормальний.]"
         state.status = "completed"
         print(f"--- [Task {task_id}] Execution Completed ---")
     except asyncio.CancelledError:
