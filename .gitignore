@@ -11,3 +11,6 @@ venv/
 # Environment
 .env
 .env.*
+
+# LLM Provider Credentials
+llm_provider_mcp/credentials/
