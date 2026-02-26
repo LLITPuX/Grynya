@@ -3,13 +3,24 @@ import sys
 import asyncio
 import json
 import threading
+import logging
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from io import StringIO
 from dotenv import load_dotenv
-from fastmcp import FastMCP
 
-# Optional: Add any pre-startup configuration here
+# Ensure we have access to original streams
+_original_stdout = sys.stdout
+_original_stderr = sys.stderr
+
+# Configure logging to go to stderr by default
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    stream=_original_stderr
+)
+logger = logging.getLogger("llm-provider-mcp")
+
 load_dotenv()
 
 # --- Task Manager Infrastructure (Phase 1) ---
@@ -28,30 +39,31 @@ class TaskState:
 TaskManager: dict[str, TaskState] = {}
 log_lock = threading.Lock()
 
-class AsyncIOSafeStdout:
-    def __init__(self, original_stdout):
-        self.original_stdout = original_stdout
-
-    def write(self, s):
+class AsyncIOSafeLogHandler(logging.Handler):
+    def emit(self, record):
         task_id = current_task_id.get()
         if task_id and task_id in TaskManager:
+            msg = self.format(record)
             with log_lock:
-                TaskManager[task_id].logs_buffer.append(s)
-        self.original_stdout.write(s)
-        
-    def flush(self):
-        self.original_stdout.flush()
-        
-    def __getattr__(self, name):
-        return getattr(self.original_stdout, name)
+                TaskManager[task_id].logs_buffer.append(msg + "\n")
 
-sys.stdout = AsyncIOSafeStdout(sys.stdout)
-sys.stderr = AsyncIOSafeStdout(sys.stderr)
+# Add the task-aware handler to our logger
+task_handler = AsyncIOSafeLogHandler()
+logger.addHandler(task_handler)
 
+# Redirect print to logger.info to ensure it goes to stderr and gets captured
+def safe_print(*args, **kwargs):
+    msg = " ".join(map(str, args))
+    logger.info(msg)
+
+# Monkeypatch print for this module
+print = safe_print
+
+from fastmcp import FastMCP
 # Create the MCP server
 mcp = FastMCP("llm-provider-mcp")
 
-def call_gemini(prompt: str, system_prompt: str, model: str) -> str:
+def call_gemini(prompt: str, system_prompt: str, model: str, tools_info: str = None) -> str:
     from google import genai
     from google.genai import types
     from google.oauth2.credentials import Credentials
@@ -72,24 +84,33 @@ def call_gemini(prompt: str, system_prompt: str, model: str) -> str:
             if creds.expired and creds.refresh_token:
                 creds.refresh(Request())
             
+        if not model.startswith("models/"):
+            full_model_name = f"models/{model}"
+        else:
+            full_model_name = model
+
         print(f"[call_gemini] Using direct REST API request with Bearer token.")
         
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+        url = f"https://generativelanguage.googleapis.com/v1beta/{full_model_name}:generateContent"
         headers = {
             "Authorization": f"Bearer {creds.token}",
             "Content-Type": "application/json"
         }
         
-        payload = {
-            "contents": [{
-                "parts": [{"text": prompt}]
-            }]
-        }
-        
+        payload = {}
         if system_prompt:
             payload["systemInstruction"] = {
                 "parts": [{"text": system_prompt}]
             }
+        
+        # Add tool context to prompt if available
+        final_prompt = prompt
+        if tools_info:
+            final_prompt = f"Available tools context:\n{tools_info}\n\nTask: {prompt}"
+            
+        payload["contents"] = [{
+            "parts": [{"text": final_prompt}]
+        }]
             
         print(f"[call_gemini] Sending request to Gemini {model}... This might take a while.")
         response = requests.post(url, headers=headers, json=payload)
@@ -210,23 +231,43 @@ async def agent_task_wrapper(task_id: str, prompt: str, system_prompt: str, mode
         state.error = str(e)
 
 @mcp.tool()
-async def run_agent_task(prompt: str, system_prompt: str = None, model: str = "gemini-2.5-flash-thinking-exp") -> str:
+async def run_agent_task(prompt: str, system_prompt: str = None, model: str = "gemini-2.5-flash") -> str:
     """
     [БЛОКУЄ] Запускає задачу агента синхронно через вказаного LLM провайдера.
     Примітка: Блокує event loop сервера FastMCP при інтенсивному використанні.
     """
     print(f"[run_agent_task] Received request for model: {model}")
-    model_lower = model.lower()
     
+    # Discovery tools from grynya-mcp-server
+    tools_info = "No database tools discovered."
+    from mcp.client.sse import sse_client
+    from mcp.client.session import ClientSession
+    
+    server_url = "http://grynya-mcp-server:8000/sse"
+    try:
+        async with sse_client(server_url, headers={"Host": "localhost"}) as streams:
+            async with ClientSession(streams[0], streams[1]) as session:
+                await session.initialize()
+                tools_response = await session.list_tools()
+                tools_list = []
+                for t in tools_response.tools:
+                    tools_list.append(f"Tool: {t.name}, Description: {t.description}")
+                tools_info = "\n".join(tools_list)
+                print(f"[run_agent_task] Discovered {len(tools_response.tools)} database tools.")
+    except Exception as e:
+        print(f"[run_agent_task] Failed to discover tools: {e}")
+
+    model_lower = model.lower()
     if "gemini" in model_lower:
-        return await asyncio.to_thread(call_gemini, prompt, system_prompt, model)
+        return await asyncio.to_thread(call_gemini, prompt, system_prompt, model, tools_info)
     elif "gpt" in model_lower or "o1" in model_lower or "o3" in model_lower:
+        # OpenAI doesn't get tools metadata yet in this simple wrapper
         return await asyncio.to_thread(call_openai, prompt, system_prompt, model)
     else:
         return f"Error: Unsupported model identifier '{model}'."
 
 @mcp.tool()
-async def start_async_agent_task(prompt: str, system_prompt: str = None, model: str = "gemini-2.5-flash-thinking-exp") -> str:
+async def start_async_agent_task(prompt: str, system_prompt: str = None, model: str = "gemini-2.5-flash") -> str:
     """
     Запускає асинхронну задачу агента у фоновому режимі. 
     Повертає task_id негайно без блокування.
