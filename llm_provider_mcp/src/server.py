@@ -163,6 +163,27 @@ async def agent_task_wrapper(task_id: str, prompt: str, system_prompt: str, mode
                 tool_names = [t.name for t in tools_response.tools]
                 print(f"[{task_id}] Discovered tools: {tool_names}")
                 print(f"[{task_id}] Бачу базу та інструменти, полет нормальний.")
+
+                # Direct write to the graph (Phase 3)
+                import datetime
+                now = datetime.datetime.now(datetime.timezone.utc)
+                day_id_str = "d_" + now.strftime("%Y_%m_%d")
+                
+                print(f"[{task_id}] Writing progress to FalkorDB directly via grynya-mcp-server...")
+                try:
+                    save_res = await session.call_tool("add_node", arguments={
+                        "node_type": "Analysis",
+                        "node_data": {
+                            "id": f"klim_progress_{task_id}",
+                            "full_text": f"[Status Update from Klim] Task ID: {task_id}. Proceeding with model {model}.",
+                            "time": now.isoformat()
+                        },
+                        "day_id": day_id_str
+                    })
+                    print(f"[{task_id}] Graph save response: {save_res}")
+                except Exception as e:
+                    print(f"[{task_id}] Failed to save to graph: {e}")
+
         
         # Execute blocking calls off the main event loop
         model_lower = model.lower()
@@ -191,8 +212,8 @@ async def agent_task_wrapper(task_id: str, prompt: str, system_prompt: str, mode
 @mcp.tool()
 async def run_agent_task(prompt: str, system_prompt: str = None, model: str = "gemini-2.5-flash-thinking-exp") -> str:
     """
-    [BLOCKING] Run an agent task synchronously via the specified LLM provider.
-    Note: Blocks the fastMCP server event loop if used heavily.
+    [БЛОКУЄ] Запускає задачу агента синхронно через вказаного LLM провайдера.
+    Примітка: Блокує event loop сервера FastMCP при інтенсивному використанні.
     """
     print(f"[run_agent_task] Received request for model: {model}")
     model_lower = model.lower()
@@ -207,9 +228,9 @@ async def run_agent_task(prompt: str, system_prompt: str = None, model: str = "g
 @mcp.tool()
 async def start_async_agent_task(prompt: str, system_prompt: str = None, model: str = "gemini-2.5-flash-thinking-exp") -> str:
     """
-    Starts an asynchronous agent task in the background. 
-    Returns the task_id immediately without blocking.
-    Use `check_task_status(task_id)` to get logs and results.
+    Запускає асинхронну задачу агента у фоновому режимі. 
+    Повертає task_id негайно без блокування.
+    Використовуйте `check_task_status(task_id)` для отримання логів та результатів.
     """
     import uuid
     task_id = str(uuid.uuid4())
@@ -227,9 +248,28 @@ async def start_async_agent_task(prompt: str, system_prompt: str = None, model: 
     })
 
 @mcp.tool()
+def cancel_agent_task(task_id: str) -> str:
+    """
+    Скасовує асинхронну задачу агента, яка виконується у фоновому режимі.
+    """
+    if task_id not in TaskManager:
+        return json.dumps({"status": "error", "message": f"Task {task_id} not found."})
+        
+    state = TaskManager[task_id]
+    
+    if state.status == "running":
+        if state.task_obj and not state.task_obj.done():
+            state.task_obj.cancel()
+            return json.dumps({"status": "success", "message": f"Task {task_id} has been cancelled."})
+        else:
+            return json.dumps({"status": "error", "message": f"Task {task_id} has no running task object."})
+    else:
+        return json.dumps({"status": "error", "message": f"Task {task_id} is not running (current status: {state.status})."})
+
+@mcp.tool()
 def check_task_status(task_id: str) -> str:
     """
-    Checks the status, logs, and potential result/error of an asynchronous task.
+    Перевіряє статус, логи та потенційний результат/помилку асинхронної задачі.
     """
     if task_id not in TaskManager:
         return json.dumps({"status": "error", "message": f"Task {task_id} not found."})
