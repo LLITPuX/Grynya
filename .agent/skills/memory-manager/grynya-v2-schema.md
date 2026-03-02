@@ -25,6 +25,10 @@ globs: **/*.py, **/*.md, **/*.json
 | | | `id_rules` → `RULES` : "Системні правила та директиви" |
 | | | `id_pole` → `ROLE` : "Роль та Особистість" |
 | | | `id_skills` → `SKILLS` : "Перелік навичок агентів" |
+| `:System` | `id`, `type`, `name`, `content` | `sys_role_1` → `System Role` (type: `role`) |
+| | | `sys_rules_1` → `System Rules` (type: `rules`) |
+| | | `sys_tasks_1` → `System Tasks` (type: `tasks`) |
+| `:State` | `id`, `name` | `state_test_1` → `12:20` |
 
 ## Зв'язки (Relationships)
 
@@ -40,3 +44,9 @@ globs: **/*.py, **/*.md, **/*.json
 | `[:BLOCK_3]` | `:Conceptions` | `:SubConceptions` | — | `id_agents_state` → `id_tasks` |
 | `[:BLOCK_4]` | `:Conceptions` | `:SubConceptions` | `id` | `id_agents_state` → `id_context` |
 | `[:BLOCK_5]` | `:Conceptions` | `:SubConceptions` | `id` | `id_agents_state` → `id_skills` |
+| `[:CONTAINS]` | `:SubConceptions` | `:System` | — | `id_pole` → `sys_role_1` |
+| | | | | `id_rules` → `sys_rules_1` |
+| | | | | `id_tasks` → `sys_tasks_1` |
+| `[:BLOCK_1]` | `:State` | `:System` | — | `state_test_1` → `sys_role_1` |
+| `[:BLOCK_2]` | `:State` | `:System` | — | `state_test_1` → `sys_rules_1` |
+| `[:BLOCK_3]` | `:State` | `:System` | — | `state_test_1` → `sys_tasks_1` |
