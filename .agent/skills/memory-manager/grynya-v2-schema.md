@@ -56,3 +56,5 @@ globs: **/*.py, **/*.md, **/*.json
 | `[:BLOCK_2]` | `:State` | `:System` | — | `state_test_1` → `sys_rule_code` |
 | `[:BLOCK_2]` | `:State` | `:System` | — | `state_test_1` → `sys_rule_limits` |
 | `[:BLOCK_3]` | `:State` | `:System` | — | `state_test_1` → `sys_tasks_1` |
+| `[:HAPPENED_AT]` | `:State` | `:Day` | — | `state_test_1` → `d_2026_02_28` |
+| `[:BELONGS_TO]` | `:State` | `:Agents` | — | `state_test_1` → `id_cursa4` |

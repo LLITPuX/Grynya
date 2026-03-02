@@ -403,3 +403,50 @@ async def copy_graph(source_graph: str, destination_graph: str) -> str:
         })
     except Exception as e:
         return json.dumps({"status": "error", "message": str(e)})
+
+
+@mcp.resource("system://gemini_prompt")
+async def get_system_prompt() -> str:
+    """Генерує та повертає системний промпт зі State графа."""
+    try:
+        r = await get_db()
+        state_id = "state_test_1"
+        
+        q_role = f"MATCH (s:State)-[:BLOCK_1]->(sys:System) RETURN sys.name, sys.content ORDER BY sys.id"
+        r_role = format_falkordb_results(await r.execute_command("GRAPH.QUERY", GRAPH_NAME, q_role))
+        
+        q_rules = f"MATCH (s:State)-[:BLOCK_2]->(sys:System) RETURN sys.name, sys.content ORDER BY sys.id"
+        r_rules = format_falkordb_results(await r.execute_command("GRAPH.QUERY", GRAPH_NAME, q_rules))
+        
+        q_tasks = f"MATCH (s:State)-[:BLOCK_3]->(sys:System) RETURN sys.name, sys.content ORDER BY sys.id"
+        r_tasks = format_falkordb_results(await r.execute_command("GRAPH.QUERY", GRAPH_NAME, q_tasks))
+        
+        prompt_parts = []
+        if r_role:
+             prompt_parts.append(f"## 1. Роль та Особистість\n\n{r_role[0].get('sys.content', '')}")
+             
+        section_idx = 2
+        if r_rules:
+             for rule in r_rules:
+                 title = str(rule.get('sys.name', '')).replace('Системні правила (', '').replace(')', '')
+                 if title == 'Мовні Директиви':
+                     title = 'Мовні Директиви (Суворий пріоритет)'
+                 elif title == 'Код':
+                     title = 'Золоті Стандарти Розробки'
+                 elif title == 'Межі Відповідальності':
+                     title = 'Межі Відповідальності (Guardrails)'
+                     
+                 prompt_parts.append(f"## {section_idx}. {title}\n\n{rule.get('sys.content', '')}")
+                 section_idx += 1
+                 
+        if r_tasks:
+             for task in r_tasks:
+                 title = str(task.get('sys.name', ''))
+                 prompt_parts.append(f"## {section_idx}. {title}\n\n{task.get('sys.content', '')}")
+                 section_idx += 1
+                 
+        full_prompt = "\n\n---\n\n".join(prompt_parts)
+        return full_prompt
+    except Exception as e:
+        logger.error(f"Failed to generate prompt resource: {e}")
+        return str(e)
