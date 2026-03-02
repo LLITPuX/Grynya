@@ -25,8 +25,10 @@ globs: **/*.py, **/*.md, **/*.json
 | | | `id_rules` → `RULES` : "Системні правила та директиви" |
 | | | `id_pole` → `ROLE` : "Роль та Особистість" |
 | | | `id_skills` → `SKILLS` : "Перелік навичок агентів" |
-| `:System` | `id`, `type`, `name`, `content` | `sys_role_1` → `System Role` (type: `role`) |
-| | | `sys_rules_1` → `System Rules` (type: `rules`) |
+| `:System` | `id`, `type`, `name`, `content` | `sys_role_grynya` → `Системна Роль (Гриня)` (type: `role`) |
+| | | `sys_rule_lang` → `Системні правила (Мовні Директиви)` (type: `rules`) |
+| | | `sys_rule_code` → `Системні правила (Код)` (type: `rules`) |
+| | | `sys_rule_limits` → `Системні правила (Межі Відповідальності)` (type: `rules`) |
 | | | `sys_tasks_1` → `System Tasks` (type: `tasks`) |
 | `:State` | `id`, `name` | `state_test_1` → `12:20` |
 
@@ -44,9 +46,13 @@ globs: **/*.py, **/*.md, **/*.json
 | `[:BLOCK_3]` | `:Conceptions` | `:SubConceptions` | — | `id_agents_state` → `id_tasks` |
 | `[:BLOCK_4]` | `:Conceptions` | `:SubConceptions` | `id` | `id_agents_state` → `id_context` |
 | `[:BLOCK_5]` | `:Conceptions` | `:SubConceptions` | `id` | `id_agents_state` → `id_skills` |
-| `[:CONTAINS]` | `:SubConceptions` | `:System` | — | `id_pole` → `sys_role_1` |
-| | | | | `id_rules` → `sys_rules_1` |
+| `[:CONTAINS]` | `:SubConceptions` | `:System` | — | `id_pole` → `sys_role_grynya` |
+| | | | | `id_rules` → `sys_rule_lang` |
+| | | | | `id_rules` → `sys_rule_code` |
+| | | | | `id_rules` → `sys_rule_limits` |
 | | | | | `id_tasks` → `sys_tasks_1` |
-| `[:BLOCK_1]` | `:State` | `:System` | — | `state_test_1` → `sys_role_1` |
-| `[:BLOCK_2]` | `:State` | `:System` | — | `state_test_1` → `sys_rules_1` |
+| `[:BLOCK_1]` | `:State` | `:System` | — | `state_test_1` → `sys_role_grynya` |
+| `[:BLOCK_2]` | `:State` | `:System` | — | `state_test_1` → `sys_rule_lang` |
+| `[:BLOCK_2]` | `:State` | `:System` | — | `state_test_1` → `sys_rule_code` |
+| `[:BLOCK_2]` | `:State` | `:System` | — | `state_test_1` → `sys_rule_limits` |
 | `[:BLOCK_3]` | `:State` | `:System` | — | `state_test_1` → `sys_tasks_1` |
