@@ -405,9 +405,10 @@ async def copy_graph(source_graph: str, destination_graph: str) -> str:
         return json.dumps({"status": "error", "message": str(e)})
 
 
-@mcp.resource("system://gemini_prompt")
-async def get_system_prompt() -> str:
-    """Генерує та повертає системний промпт зі State графа."""
+from mcp.types import PromptMessage, TextContent
+
+async def _build_system_prompt_text() -> str:
+    """Генерує та повертає текст системного промпту зі State графа."""
     try:
         r = await get_db()
         state_id = "state_test_1"
@@ -448,5 +449,27 @@ async def get_system_prompt() -> str:
         full_prompt = "\n\n---\n\n".join(prompt_parts)
         return full_prompt
     except Exception as e:
-        logger.error(f"Failed to generate prompt resource: {e}")
-        return str(e)
+        logger.error(f"Failed to generate prompt text: {e}")
+        return f"Error: {e}"
+
+@mcp.resource("system://gemini_prompt")
+async def get_system_prompt() -> str:
+    """Генерує та повертає системний промпт зі State графа (як ресурс)."""
+    return await _build_system_prompt_text()
+
+@mcp.prompt("Grynya_Persona")
+async def get_grynya_persona() -> list[PromptMessage]:
+    """MCP Prompt, який збирає контекст поведінки агента з графа."""
+    text = await _build_system_prompt_text()
+    
+    instructions = (
+        "This is the system persona and rules you MUST follow. "
+        "Read it carefully and apply it to all subsequent responses.\n\n"
+    ) + text
+    
+    return [
+        PromptMessage(
+            role="user",
+            content=TextContent(type="text", text=instructions)
+        )
+    ]
