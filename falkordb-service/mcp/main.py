@@ -1,6 +1,9 @@
 import os
 import logging
 import json
+import uuid
+import asyncio
+from datetime import datetime
 import redis.asyncio as redis
 from fastapi import FastAPI, Request
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
@@ -189,6 +192,110 @@ async def create_session(session_id: str, name: str, topic: str, trigger: str, d
             
     return json.dumps({"status": "success", "results": results})
 
+
+@mcp.tool()
+async def init_session_with_context(query: str, date: str, year: int, session_id: str = None) -> str:
+    """Ініціалізує нову сесію, відправляє запит на збір контексту Кліму через Redis Pub/Sub та чекає на результат."""
+    if not session_id:
+        session_id = f"session_{uuid.uuid4().hex[:8]}"
+        
+    try:
+        r = await get_db()
+    except Exception as e:
+        return json.dumps({"status": "error", "message": str(e)})
+        
+    # Transaction 1
+    req_id = f"req_{uuid.uuid4().hex[:8]}"
+    queries = []
+    
+    props = f"name: 'Async Session', topic: 'Auto-context', status: 'active', trigger: '/db'"
+    queries.append(f"MERGE (s:Session {{id: '{session_id}'}}) SET s += {{{props}}}")
+    
+    # Year & Day
+    month_num = date.split('-')[1]
+    y_id = f"year_{year}"
+    day_id = f"d_{date.replace('-','_')}"
+    queries.append(f"MERGE (y:Year {{value: {year}, id: '{y_id}', name: '{year}'}})")
+    queries.append(f"MERGE (d:Day {{date: '{date}', id: '{day_id}', name: '{date}'}})")
+    queries.append(f"MATCH (y:Year {{id: '{y_id}'}}), (d:Day {{id: '{day_id}'}}) MERGE (y)-[:MONTH {{number: {month_num}}}]->(d)")
+    
+    # Request
+    req_props = f"text: {e_str(query)}, role: 'user'"
+    queries.append(f"MERGE (req:Request {{id: '{req_id}'}}) SET req += {{{req_props}}}")
+    queries.append(f"MATCH (s:Session {{id: '{session_id}'}}), (req:Request {{id: '{req_id}'}}) MERGE (req)-[:PART_OF]->(s)")
+    
+    time_str = datetime.now().strftime("%H:%M:%S")
+    queries.append(f"MATCH (req {{id: '{req_id}'}}), (d:Day {{id: '{day_id}'}}) MERGE (req)-[:HAPPENED_AT {{time: '{time_str}'}}]->(d)")
+
+    # Execute T1
+    for q in queries:
+        try:
+            await r.execute_command("GRAPH.QUERY", GRAPH_NAME, q)
+        except Exception as e:
+            return json.dumps({"status": "error", "message": f"T1 failed: {e}", "query": q})
+            
+    # Subscribe to Klim's response channel
+    pubsub = r.pubsub()
+    channel_name = f"klim:results:{session_id}"
+    await pubsub.subscribe(channel_name)
+    
+    # Publish task to Klim
+    task_payload = {
+        "session_id": session_id,
+        "task_type": "research_context",
+        "query": query,
+        "timestamp": datetime.utcnow().isoformat() + "Z"
+    }
+    await r.publish("klim:tasks", json.dumps(task_payload))
+    
+    # Await result with timeout
+    result_payload = None
+    try:
+        async def wait_for_msg():
+            async for message in pubsub.listen():
+                if message["type"] == "message":
+                    return json.loads(message["data"])
+        
+        result_payload = await asyncio.wait_for(wait_for_msg(), timeout=45.0)
+    except asyncio.TimeoutError:
+        result_payload = {
+            "status": "error",
+            "context": "",
+            "error_msg": "Timeout waiting for Klim worker (45s)"
+        }
+    except Exception as e:
+         result_payload = {
+            "status": "error",
+            "context": "",
+            "error_msg": str(e)
+        }
+    finally:
+        await pubsub.unsubscribe(channel_name)
+        
+    # Transaction 2
+    ctx_id = f"ctx_{uuid.uuid4().hex[:8]}"
+    ctx_status = result_payload.get("status", "error")
+    ctx_text = result_payload.get("context", result_payload.get("error_msg", "Empty context"))
+    
+    q_ctx = []
+    ctx_props = f"text: {e_str(ctx_text)}, status: '{ctx_status}'"
+    q_ctx.append(f"MERGE (c:Research_Context {{id: '{ctx_id}'}}) SET c += {{{ctx_props}}}")
+    q_ctx.append(f"MATCH (req:Request {{id: '{req_id}'}}), (c:Research_Context {{id: '{ctx_id}'}}) MERGE (c)-[:CONTEXT_FOR]->(req)")
+    
+    for q in q_ctx:
+        try:
+            await r.execute_command("GRAPH.QUERY", GRAPH_NAME, q)
+        except Exception as e:
+            logger.error(f"T2 failed: {e} query: {q}")
+            
+    return json.dumps({
+        "status": "success",
+        "session_id": session_id,
+        "request_id": req_id,
+        "context_id": ctx_id,
+        "klim_status": ctx_status,
+        "context": ctx_text
+    })
 
 @mcp.tool()
 async def add_node(node_type: str, node_data: dict, day_id: str = None, time: str = None, relations: list = []) -> str:

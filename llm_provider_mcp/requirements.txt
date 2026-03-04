@@ -5,3 +5,4 @@ google-auth-oauthlib
 openai
 python-dotenv
 pydantic
+redis

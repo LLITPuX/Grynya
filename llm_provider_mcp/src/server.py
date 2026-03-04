@@ -477,7 +477,8 @@ async def research_graph(
     user_query: str,
     graphs: list = None,
     model: str = "gemini-2.5-flash",
-    skill_name: str = "graph-research"
+    skill_name: str = "graph-research",
+    save_to_graph: bool = True
 ) -> str:
     """
     Досліджує граф(и) FalkorDB за запитом користувача через Klim (Gemini Function Calling).
@@ -563,21 +564,24 @@ async def research_graph(
                     "time": now.isoformat()
                 }
 
-                save_result = await session.call_tool("add_node", arguments={
-                    "node_type": "Research",
-                    "node_data": node_data,
-                    "day_id": day_id,
-                    "time": now.strftime("%H:%M:%S")
-                })
-                print(f"[research_graph] :Research node saved: {research_id}")
+                if save_to_graph:
+                    save_result = await session.call_tool("add_node", arguments={
+                        "node_type": "Research",
+                        "node_data": node_data,
+                        "day_id": day_id,
+                        "time": now.strftime("%H:%M:%S")
+                    })
+                    print(f"[research_graph] :Research node saved: {research_id}")
 
-                if source_node_ids:
-                    links = [
-                        {"source_id": research_id, "target_id": nid, "type": "SOURCED_FROM"}
-                        for nid in source_node_ids[:20]
-                    ]
-                    await session.call_tool("batch_link_nodes", arguments={"links": links})
-                    print(f"[research_graph] Linked {len(links)} source nodes.")
+                    if source_node_ids:
+                        links = [
+                            {"source_id": research_id, "target_id": nid, "type": "SOURCED_FROM"}
+                            for nid in source_node_ids[:20]
+                        ]
+                        await session.call_tool("batch_link_nodes", arguments={"links": links})
+                        print(f"[research_graph] Linked {len(links)} source nodes.")
+                else:
+                    print(f"[research_graph] Skipping DB modifications: save_to_graph=False")
 
                 return json.dumps({
                     "status": "success",
@@ -621,6 +625,78 @@ def check_task_status(task_id: str) -> str:
         response["error"] = state.error
         
     return json.dumps(response)
+
+async def background_listener():
+    import redis.asyncio as aioredis
+    import os
+    import json
+    db_host = os.getenv("FALKORDB_HOST", "falkordb")
+    db_port = int(os.getenv("FALKORDB_PORT", "6379"))
+    
+    while True:
+        try:
+            r = aioredis.Redis(host=db_host, port=db_port, decode_responses=False)
+            await r.ping()
+            print("[background_listener] Connected to Redis for klim:tasks")
+            pubsub = r.pubsub()
+            await pubsub.subscribe("klim:tasks")
+            
+            async for message in pubsub.listen():
+                if message["type"] == "message":
+                    try:
+                        data = message["data"]
+                        if isinstance(data, bytes):
+                            data = data.decode('utf-8')
+                        payload = json.loads(data)
+                        
+                        session_id = payload.get("session_id")
+                        task_type = payload.get("task_type")
+                        query = payload.get("query")
+                        
+                        if task_type == "research_context":
+                            print(f"[background_listener] Processing research task for session: {session_id}")
+                            try:
+                                result_str = await research_graph(user_query=query, save_to_graph=False)
+                                result_data = json.loads(result_str)
+                                
+                                if result_data.get("status") == "error":
+                                    resp_payload = {
+                                        "session_id": session_id,
+                                        "status": "error",
+                                        "error_msg": result_data.get("message")
+                                    }
+                                else:
+                                    # Ensure we just return context summary. Spec says 'context: Зібраний Markdown текст...'
+                                    resp_payload = {
+                                        "session_id": session_id,
+                                        "status": "success",
+                                        "context": result_data.get("summary", "Done.")
+                                    }
+                            except Exception as ex:
+                                resp_payload = {
+                                    "session_id": session_id,
+                                    "status": "error",
+                                    "error_msg": str(ex)
+                                }
+                                
+                            await r.publish(f"klim:results:{session_id}", json.dumps(resp_payload))
+                            print(f"[background_listener] Published result for {session_id}")
+                    except Exception as e:
+                        print(f"[background_listener] Error handling message: {e}")
+        except Exception as e:
+            print(f"[background_listener] Redis connection error, retrying in 5s: {e}")
+            await asyncio.sleep(5)
+
+def start_redis_listener_thread():
+    def run_loop():
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(background_listener())
+    
+    t = threading.Thread(target=run_loop, daemon=True)
+    t.start()
+
+start_redis_listener_thread()
 
 if __name__ == "__main__":
     import sys

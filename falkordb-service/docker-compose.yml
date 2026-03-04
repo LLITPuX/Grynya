@@ -61,6 +61,8 @@ services:
       - GEMINI_CLIENT_SECRET_PATH=${GEMINI_CLIENT_SECRET_PATH:-credentials/client_secret.json}
       - GEMINI_TOKEN_PATH=${GEMINI_TOKEN_PATH:-credentials/token.json}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - FALKORDB_HOST=falkordb
+      - FALKORDB_PORT=6379
     command: [ "python", "src/server.py", "--sse" ]
     ports:
       - "8001:8001"
