@@ -45,6 +45,7 @@ services:
     environment:
       - FALKORDB_HOST=falkordb
       - FALKORDB_PORT=6379
+      - GRAPH_NAME=Grynya_v2.0
     restart: unless-stopped
     networks:
       - grynya-net
